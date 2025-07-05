@@ -1,0 +1,76 @@
+# Archivos de entorno y configuración sensible
+.env
+.env.local
+.env.production
+.env.staging
+
+# Base de datos local
+*.db
+*.sqlite
+*.sqlite3
+
+# Entorno virtual
+venv/
+env/
+ENV/
+.venv/
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+logs/
+*.log
+
+# Archivos temporales del sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Archivos de Chrome/Selenium
+chromedriver
+chromedriver.exe
+geckodriver
+geckodriver.exe
+
+# Archivos de descarga de webdriver-manager
+.wdm/
+
+# Archivos de respaldo
+*.bak
+*.backup
+*.tmp
+
+# Archivos de configuración local
+config.local.py
+settings.local.py 
