@@ -68,8 +68,110 @@ case "$1" in
             echo "Base de datos no encontrada"
         fi
         ;;
+    check)
+        echo "🔍 Verificación completa del sistema RPA:"
+        echo "========================================"
+        echo ""
+        
+        # Verificar archivo .env
+        echo "📋 Verificando configuración (.env):"
+        if [ -f ".env" ]; then
+            echo "✅ Archivo .env encontrado"
+            if grep -q "EMAIL_USER" .env && grep -q "EMAIL_PASSWORD" .env; then
+                echo "✅ Credenciales de email configuradas"
+            else
+                echo "⚠️  Credenciales de email no encontradas"
+            fi
+        else
+            echo "❌ Archivo .env no encontrado"
+        fi
+        echo ""
+        
+        # Verificar Python y dependencias
+        echo "🐍 Verificando Python y dependencias:"
+        if command -v python3 &> /dev/null; then
+            echo "✅ Python3 instalado: $(python3 --version)"
+        else
+            echo "❌ Python3 no encontrado"
+        fi
+        
+        if [ -d "venv" ]; then
+            echo "✅ Entorno virtual encontrado"
+            source venv/bin/activate
+            if pip list | grep -q selenium; then
+                echo "✅ Selenium instalado"
+            else
+                echo "❌ Selenium no encontrado"
+            fi
+        else
+            echo "❌ Entorno virtual no encontrado"
+        fi
+        echo ""
+        
+        # Verificar Chrome y ChromeDriver
+        echo "🌐 Verificando Chrome y ChromeDriver:"
+        if command -v google-chrome &> /dev/null; then
+            echo "✅ Chrome instalado: $(google-chrome --version)"
+        else
+            echo "❌ Chrome no encontrado"
+        fi
+        
+        if command -v chromedriver &> /dev/null; then
+            echo "✅ ChromeDriver instalado: $(chromedriver --version)"
+        else
+            echo "❌ ChromeDriver no encontrado"
+        fi
+        echo ""
+        
+        # Verificar directorios
+        echo "📁 Verificando directorios:"
+        if [ -d "logs" ]; then
+            echo "✅ Directorio logs encontrado"
+        else
+            echo "❌ Directorio logs no encontrado"
+        fi
+        
+        if [ -d "data" ]; then
+            echo "✅ Directorio data encontrado"
+        else
+            echo "❌ Directorio data no encontrado"
+        fi
+        echo ""
+        
+        # Verificar archivos principales
+        echo "📄 Verificando archivos principales:"
+        if [ -f "src/main.py" ]; then
+            echo "✅ main.py encontrado"
+        else
+            echo "❌ main.py no encontrado"
+        fi
+        
+        if [ -f "requirements.txt" ]; then
+            echo "✅ requirements.txt encontrado"
+        else
+            echo "❌ requirements.txt no encontrado"
+        fi
+        echo ""
+        
+        # Verificar servicio systemd
+        echo "⚙️ Verificando servicio systemd:"
+        if [ -f "/etc/systemd/system/$SERVICE_NAME" ]; then
+            echo "✅ Archivo de servicio encontrado"
+        else
+            echo "❌ Archivo de servicio no encontrado"
+        fi
+        
+        if systemctl is-active --quiet $SERVICE_NAME; then
+            echo "✅ Servicio está activo"
+        else
+            echo "⚠️  Servicio no está activo"
+        fi
+        echo ""
+        
+        echo "🔍 Verificación completada"
+        ;;
     *)
-        echo "❌ Uso: $0 {start|stop|restart|status|logs|logs-recent|enable|disable|check-logs|check-db}"
+        echo "❌ Uso: $0 {start|stop|restart|status|logs|logs-recent|enable|disable|check-logs|check-db|check}"
         echo ""
         echo "Comandos disponibles:"
         echo "  start       - Iniciar el servicio"
@@ -82,6 +184,7 @@ case "$1" in
         echo "  disable     - Deshabilitar inicio automático"
         echo "  check-logs  - Verificar archivos de log"
         echo "  check-db    - Verificar base de datos"
+        echo "  check       - Verificación completa del sistema"
         exit 1
         ;;
 esac 
