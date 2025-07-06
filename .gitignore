@@ -1,21 +1,16 @@
-# Archivos de entorno y configuración sensible
+# Environment files
 .env
 .env.local
 .env.production
 .env.staging
 
-# Base de datos local
+# Database files
 *.db
 *.sqlite
 *.sqlite3
+rpa.db
 
-# Entorno virtual
-venv/
-env/
-ENV/
-.venv/
-
-# Archivos de caché de Python
+# Python cache and compiled files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -37,11 +32,26 @@ wheels/
 .installed.cfg
 *.egg
 
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
 # Logs
 logs/
 *.log
+rpa_background.log
+rpa_vps_*.log
 
-# Archivos temporales del sistema
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# System files
 .DS_Store
 .DS_Store?
 ._*
@@ -50,27 +60,24 @@ logs/
 ehthumbs.db
 Thumbs.db
 
-# Archivos de IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Archivos de Chrome/Selenium
+# Chrome/Selenium files
 chromedriver
 chromedriver.exe
 geckodriver
 geckodriver.exe
-
-# Archivos de descarga de webdriver-manager
 .wdm/
 
-# Archivos de respaldo
+# Backup files
 *.bak
 *.backup
 *.tmp
 
-# Archivos de configuración local
+# Local configuration
 config.local.py
-settings.local.py 
+settings.local.py
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/ 

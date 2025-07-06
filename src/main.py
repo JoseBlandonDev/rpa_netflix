@@ -1,44 +1,55 @@
 """
-Script principal del RPA: Orquesta la lectura de correos, extracción de enlaces, automatización web y registro en la base de datos.
+Main RPA script: Orchestrates email reading, link extraction, web automation and database recording.
 """
+import requests
+import time
+from dotenv import load_dotenv
+import os
 from sub.email_reader import validate_credentials, extract_links
 from sub.driver_web import WebAutomator
 from sub.database import save_record, get_next_process_id
+from sub.logger import get_logger
+from sub.error_handler import (
+    handle_errors, safe_execute, ErrorRecovery, 
+    log_error_context, create_error_report,
+    EmailConnectionError, WebAutomationError, DatabaseError
+)
 from datetime import datetime
 from imap_tools.mailbox import MailBox
 from imap_tools.query import AND
-from dotenv import load_dotenv
-import os
-import time
-import requests
 
 load_dotenv()
 
-USUARIO = os.getenv("USUARIO_CORREO")
-CLAVE = os.getenv("CLAVE_CORREO")
-IMAP_SERVIDOR = os.getenv("IMAP_SERVIDOR")
-FILTRO_REMITENTE = os.getenv("FILTRO_REMITENTE")
+# Get logger instance
+logger = get_logger()
 
-SELECTOR_BOTON = os.getenv("SELECTOR_BOTON", "//button | //a[contains(text(), 'Click') or contains(text(), 'Submit') or contains(text(), 'Login') or contains(text(), 'Iniciar sesión') or contains(text(), 'Sign in') or contains(text(), 'Continue') or contains(text(), 'Next') or contains(text(), 'Accept') or contains(text(), 'OK')]")
-TIPO_SELECTOR = os.getenv("TIPO_SELECTOR", "xpath")
-MODO_HEADLESS = os.getenv("MODO_HEADLESS", "true").lower() == "true"
+# Environment variables
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+IMAP_SERVER = os.getenv("IMAP_SERVER")
+SENDER_FILTER = os.getenv("SENDER_FILTER")
+BUTTON_SELECTOR = os.getenv("BUTTON_SELECTOR", "//button | //a[contains(text(), 'Click') or contains(text(), 'Submit') or contains(text(), 'Login') or contains(text(), 'Sign in') or contains(text(), 'Continue') or contains(text(), 'Next') or contains(text(), 'Accept') or contains(text(), 'OK')]")
+SELECTOR_TYPE = os.getenv("SELECTOR_TYPE", "xpath")
+HEADLESS_MODE = os.getenv("HEADLESS_MODE", "true").lower() == "true"
+DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 class FullRPA:
     """
-    Sistema de automatización completo:
-    1. Lee correos filtrados
-    2. Extrae enlaces
-    3. Abre enlaces con Selenium
-    4. Hace clic en botones
-    5. Registra todo en la base de datos
+    Complete automation system:
+    1. Reads filtered emails
+    2. Extracts links
+    3. Opens links with Selenium
+    4. Clicks buttons
+    5. Records everything in database
     """
     
     def __init__(self, headless=True, debug=True):
         """
-        Inicializa el sistema RPA.
+        Initialize the RPA system.
         Args:
-            headless (bool): Modo headless para Selenium
-            debug (bool): Mostrar información detallada
+            headless (bool): Headless mode for Selenium
+            debug (bool): Show detailed information
         """
         self.headless = headless
         self.debug = debug
@@ -46,214 +57,295 @@ class FullRPA:
         self.total_processed = 0
         self.total_success = 0
         self.total_errors = 0
+        self.error_details = []
+        self.start_time = time.time()
+        
+        logger.info(f"RPA system initialized - Headless: {headless}, Debug: {debug}")
     
-    def log(self, mensaje):
-        """Muestra un mensaje solo si debug está activado."""
+    def log(self, message):
+        """Log a message only if debug is enabled."""
         if self.debug:
-            print(mensaje)
+            logger.info(message)
     
+    @handle_errors(max_retries=3, delay=2.0)
     def process_emails_automatically(self):
         """
-        Función principal que ejecuta todo el proceso RPA.
+        Main function that executes the complete RPA process.
         """
-        self.log("STARTING FULL AUTOMATION PROCESS")
-        self.log("=" * 60)
+        logger.info("STARTING FULL AUTOMATION PROCESS")
+        logger.info("=" * 60)
         
         try:
-            validate_credentials()
-            self.log("Credentials validated")
-            self.automator = WebAutomator(headless=self.headless)
-            self.log(f"Web automator initialized (headless={self.headless})")
+            # Pre-flight checks
+            if not self._perform_preflight_checks():
+                logger.critical("Pre-flight checks failed. Aborting execution.")
+                return
+            
+            # Initialize components
+            self._initialize_components()
+            
+            # Process emails
             self._read_and_process_emails()
+            
         except Exception as e:
-            self.log(f"General error in process: {e}")
+            logger.critical("General error in process", exception=e)
             self._register_general_error(str(e))
         finally:
-            if self.automator:
-                self.automator.close_browser()
+            # Cleanup
+            self._cleanup_resources()
             self._show_summary()
     
-    def _read_and_process_emails(self):
-        """Lee correos y procesa cada uno con Selenium."""
-        self.log("\nREADING EMAILS...")
-        usuario = str(USUARIO)
-        clave = str(CLAVE)
-        servidor = str(IMAP_SERVIDOR)
-        with MailBox(servidor).login(usuario, clave, initial_folder="INBOX") as mailbox:
-            mensajes = mailbox.fetch(criteria=AND(seen=False), limit=10, reverse=True)
-            for i, mensaje in enumerate(mensajes, start=1):
-                if FILTRO_REMITENTE and FILTRO_REMITENTE.lower() in mensaje.from_.lower():
-                    self.log(f"\nPROCESSING EMAIL #{i}")
-                    self.log(f"   From: {mensaje.from_}")
-                    self.log(f"   Subject: {mensaje.subject}")
-                    self._process_single_email(mensaje, i)
+    def _perform_preflight_checks(self) -> bool:
+        """Perform pre-flight checks before starting automation."""
+        logger.info("Performing pre-flight checks...")
+        
+        # Check system resources
+        if not ErrorRecovery.check_system_resources():
+            logger.error("System resource check failed")
+            return False
+        
+        # Validate credentials
+        if not ErrorRecovery.validate_email_credentials(EMAIL_USER, EMAIL_PASSWORD, IMAP_SERVER):
+            logger.error("Email credentials validation failed")
+            return False
+        
+        logger.info("Pre-flight checks passed")
+        return True
     
-    def _process_single_email(self, mensaje, numero):
-        """Procesa un correo individual con Selenium."""
-        process_id = get_next_process_id()
-        self.log(f"   Process ID: {process_id}")
+    def _initialize_components(self):
+        """Initialize RPA components."""
         try:
-            message_content = mensaje.text or mensaje.html or "No content"
-            self.log(f"   Extracted content: {len(message_content)} characters")
-            links = extract_links(message_content)
-            self.log(f"   Links found: {len(links)}")
-            if not links:
-                self._register_full_result(
-                    mensaje, message_content, "", "No links", 
-                    "No URLs found in the email", 
-                    "Process completed without URLs", process_id
-                )
-                return
-            extracted_url = links[0]
-            self.log(f"   Processing URL: {extracted_url}")
-            if not self._validate_url(extracted_url):
-                self._register_full_result(
-                    mensaje, message_content, extracted_url, "Invalid URL",
-                    "The URL is not accessible or is malformed",
-                    "URL validation error", process_id
-                )
-                self.total_errors += 1
-                return
-            selenium_result = self._run_web_automation(extracted_url)
-            if selenium_result["success"]:
-                self.total_success += 1
-                status = "Success"
-                final_result = "Button clicked successfully"
-            else:
-                self.total_errors += 1
-                status = "Error"
-                final_result = "Web automation failed"
-            self._register_full_result(
-                mensaje, message_content, extracted_url, status,
-                selenium_result["observations"], final_result, process_id
-            )
-            self.total_processed += 1
+            validate_credentials()
+            logger.info("Credentials validated")
+            
+            self.automator = WebAutomator(headless=self.headless)
+            logger.info(f"Web automator initialized (headless={self.headless})")
+            
         except Exception as e:
-            self.log(f"Error processing email #{numero}: {e}")
-            self._register_full_result(
-                mensaje, message_content if 'message_content' in locals() else "Error extracting content",
-                extracted_url if 'extracted_url' in locals() else "", "Error",
-                f"Error processing email: {e}", "Processing failed", process_id
-            )
+            logger.error("Failed to initialize components", exception=e)
+            raise
+    
+    @handle_errors(max_retries=2, delay=1.0)
+    def _read_and_process_emails(self):
+        """Read emails and process each one with Selenium."""
+        logger.info("READING EMAILS...")
+        
+        user = str(EMAIL_USER)
+        password = str(EMAIL_PASSWORD)
+        server = str(IMAP_SERVER)
+        
+        try:
+            with MailBox(server).login(user, password, initial_folder="INBOX") as mailbox:
+                messages = mailbox.fetch(criteria=AND(seen=False), limit=10, reverse=True)
+                
+                for i, message in enumerate(messages, start=1):
+                    if SENDER_FILTER and SENDER_FILTER.lower() in message.from_.lower():
+                        logger.info(f"PROCESSING EMAIL #{i}")
+                        logger.info(f"   From: {message.from_}")
+                        logger.info(f"   Subject: {message.subject}")
+                        self._process_single_email(message, i)
+                        
+        except Exception as e:
+            logger.error("Error reading emails", exception=e)
+            raise EmailConnectionError(f"Failed to read emails: {str(e)}")
+    
+    def _process_single_email(self, message, number):
+        """Process a single email with web automation."""
+        process_id = get_next_process_id()
+        extracted_content = message.text[:5000] + "..." if len(message.text) > 5000 else message.text
+        
+        try:
+            logger.info(f"   Process ID: {process_id}")
+            logger.info(f"   Extracted content: {len(extracted_content)} characters")
+            
+            # Extract links
+            links = extract_links(message.text)
+            logger.info(f"   Links found: {len(links)}")
+            
+            if not links:
+                logger.warning("No links found in email")
+                self._register_email_result(message, extracted_content, "", "No links found", "", "No links", process_id)
+                return
+            
+            # Process each link
+            for link in links:
+                logger.info(f"   Processing URL: {link}")
+                self._process_url(link, message, extracted_content, process_id)
+                
+        except Exception as e:
+            logger.error(f"Error processing email #{number}", exception=e)
+            self._register_email_result(message, extracted_content, "", "Error", str(e), "Processing failed", process_id)
+            self.total_errors += 1
+            self.error_details.append({
+                'type': 'Email Processing Error',
+                'message': str(e),
+                'context': f'Email #{number}',
+                'timestamp': datetime.now().isoformat()
+            })
+    
+    @handle_errors(max_retries=2, delay=1.0)
+    def _process_url(self, url, message, extracted_content, process_id):
+        """Process a single URL with web automation."""
+        try:
+            # Validate URL
+            logger.info(f"Validating URL: {url}")
+            response = requests.head(url, timeout=10)
+            if response.status_code >= 400:
+                raise WebAutomationError(f"URL returned status code {response.status_code}")
+            
+            # Open URL and perform automation
+            if self.automator:
+                success = self.automator.open_link(url)
+                if not success:
+                    raise WebAutomationError("Failed to open URL")
+                
+                # Get page title
+                title = self.automator.get_page_title()
+                logger.info(f"Page title: {title}")
+                
+                # Try to click buttons
+                click_success = self._attempt_button_clicks()
+                
+                # Get final result
+                final_result = "Success" if click_success else "Partial success"
+                self._register_email_result(message, extracted_content, url, "Success", "", final_result, process_id)
+                self.total_success += 1
+                
+            else:
+                raise WebAutomationError("Web automator not initialized")
+                
+        except Exception as e:
+            logger.error(f"Error processing URL: {url}", exception=e)
+            self._register_email_result(message, extracted_content, url, "Error", str(e), "URL processing failed", process_id)
             self.total_errors += 1
     
-    def _validate_url(self, url):
-        """Verifica si la URL es accesible."""
+    def _attempt_button_clicks(self) -> bool:
+        """Attempt to click buttons on the page."""
         try:
-            self.log(f"Validating URL: {url}")
-            response = requests.head(url, timeout=10, allow_redirects=True)
-            if response.status_code == 200:
-                self.log("URL valid and accessible")
-                return True
-            elif response.status_code == 404:
-                self.log("Error 404: Page not found")
-                return False
-            elif response.status_code in [403, 401]:
-                self.log("Access error: Page blocked or requires authentication")
-                return False
-            else:
-                self.log(f"Status code: {response.status_code}")
-                return True
-        except requests.exceptions.ConnectionError:
-            self.log("Connection error: Cannot connect to server")
-            return False
-        except requests.exceptions.Timeout:
-            self.log("Timeout: URL took too long to respond")
-            return False
-        except Exception as e:
-            self.log(f"Error validating URL: {e}")
-            return False
-    
-    def _run_web_automation(self, url):
-        """Ejecuta la automatización web en un enlace específico, probando múltiples selectores de elementos clickeables."""
-        try:
-            if not self.automator.open_link(url):
-                return {"success": False, "observations": "Could not open link in browser"}
-            time.sleep(3)
-            title = self.automator.get_page_title()
-            self.log(f"Page title: {title}")
             selectors_to_test = [
-                "//button[contains(text(), 'Click') or contains(text(), 'Submit') or contains(text(), 'Login') or contains(text(), 'Iniciar sesión') or contains(text(), 'Sign in') or contains(text(), 'Continue') or contains(text(), 'Next') or contains(text(), 'Accept') or contains(text(), 'OK')]",
-                "//a[contains(text(), 'Click') or contains(text(), 'Submit') or contains(text(), 'Login') or contains(text(), 'Iniciar sesión') or contains(text(), 'Sign in') or contains(text(), 'Continue') or contains(text(), 'Next') or contains(text(), 'Accept') or contains(text(), 'OK')]",
+                "//button[contains(text(), 'Click') or contains(text(), 'Submit') or contains(text(), 'Login') or contains(text(), 'Sign in') or contains(text(), 'Continue') or contains(text(), 'Next') or contains(text(), 'Accept') or contains(text(), 'OK')]",
+                "//a[contains(text(), 'Click') or contains(text(), 'Submit') or contains(text(), 'Login') or contains(text(), 'Sign in') or contains(text(), 'Continue') or contains(text(), 'Next') or contains(text(), 'Accept') or contains(text(), 'OK')]",
                 "//button",
                 "//a[contains(@href, '#') or contains(@href, 'javascript')]",
-                "//input[@type='submit']",
-                "//input[@type='button']"
+                BUTTON_SELECTOR
             ]
-            for i, selector in enumerate(selectors_to_test, 1):
-                self.log(f"Testing selector {i}: {selector}")
-                if self.automator.click_button(selector, "xpath", f"element {i}"):
-                    return {"success": True, "observations": f"Click successful with selector {i}"}
-                else:
+            
+            for selector in selectors_to_test:
+                if self.automator.click_button(selector, SELECTOR_TYPE, f"button with selector: {selector}"):
                     result = self.automator.get_last_click_result()
-                    self.log(f"Selector {i} failed: {result['observations']}")
-            return {"success": False, "observations": "No clickable element found on the page"}
+                    logger.info(f"Button click successful: {result}")
+                    return True
+            
+            logger.warning("No clickable buttons found")
+            return False
+            
         except Exception as e:
-            return {"success": False, "observations": f"Web automation error: {e}"}
-
-    def _register_full_result(self, mensaje, contenido_mensaje, url_extraida, status, error_detallado, resultado_final, id_proceso):
-        """Registra el resultado completo en la base de datos."""
+            logger.error("Error during button clicking", exception=e)
+            return False
+    
+    def _register_email_result(self, message, content, url, status, error_detail, final_result, process_id):
+        """Register email processing result in database."""
         try:
-            fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            remitente = mensaje.from_
-            asunto = mensaje.subject
-            contenido_truncado = contenido_mensaje[:5000] + "..." if len(contenido_mensaje) > 5000 else contenido_mensaje
             save_record(
-                fecha_hora, remitente, asunto, contenido_truncado,
-                url_extraida, status, error_detallado, resultado_final, id_proceso
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                message.from_,
+                message.subject,
+                content,
+                url,
+                status,
+                error_detail,
+                final_result,
+                process_id
             )
-            self.log(f"Record saved: {status} - ID: {id_proceso}")
+            logger.info(f"Record saved: {status} - ID: {process_id}")
+            
         except Exception as e:
-            self.log(f"Error saving to DB: {e}")
-
+            logger.error("Error saving to database", exception=e)
+    
     def _register_general_error(self, error_msg):
-        """Registra errores generales del sistema en la base de datos."""
+        """Register general system errors in database."""
         try:
-            fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             process_id = get_next_process_id()
             save_record(
-                fecha_hora, "SYSTEM", "ERROR_GENERAL", 
-                "System error", "", "Error", f"System error: {error_msg}",
-                "General failure", process_id
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "SYSTEM",
+                "ERROR_GENERAL",
+                "System error",
+                "",
+                "Error",
+                f"System error: {error_msg}",
+                "General failure",
+                process_id
             )
-        except:
-            pass
-
+        except Exception as e:
+            logger.error("Error registering general error", exception=e)
+    
+    def _cleanup_resources(self):
+        """Clean up resources."""
+        try:
+            if self.automator:
+                self.automator.close_browser()
+                logger.info("Web automator browser closed")
+        except Exception as e:
+            logger.error("Error during cleanup", exception=e)
+    
     def _show_summary(self):
-        """Muestra un resumen del proceso RPA."""
-        self.log("FULL AUTOMATION PROCESS SUMMARY")
-        self.log("=" * 40)
-        self.log(f"Emails processed: {self.total_processed}")
-        self.log(f"Successes: {self.total_success}")
-        self.log(f"Errors: {self.total_errors}")
+        """Show RPA process summary."""
+        execution_time = time.time() - self.start_time
+        
+        logger.info("FULL AUTOMATION PROCESS SUMMARY")
+        logger.info("=" * 40)
+        logger.info(f"Emails processed: {self.total_processed}")
+        logger.info(f"Successes: {self.total_success}")
+        logger.info(f"Errors: {self.total_errors}")
+        
         if self.total_processed > 0:
             success_rate = (self.total_success / self.total_processed) * 100
-            self.log(f"Success rate: {success_rate:.1f}%")
-        self.log("FULL AUTOMATION PROCESS COMPLETED")
+            logger.info(f"Success rate: {success_rate:.1f}%")
+        
+        logger.info(f"Execution time: {execution_time:.2f} seconds")
+        
+        # Log system status
+        logger.log_system_status(self.total_processed, self.total_success, self.total_errors, execution_time)
+        
+        # Create error report if there were errors
+        if self.error_details:
+            error_report = create_error_report(self.total_errors, self.error_details)
+            logger.info("Error report generated")
+            logger.debug(error_report)
+        
+        logger.info("FULL AUTOMATION PROCESS COMPLETED")
 
 def run_full_rpa(headless=True, debug=True):
     """
-    Ejecuta el proceso RPA completo.
+    Run the complete RPA process.
     Args:
-        headless (bool): Ejecutar en modo headless
-        debug (bool): Mostrar información detallada
+        headless (bool): Run in headless mode
+        debug (bool): Show detailed information
     """
     rpa = FullRPA(headless=headless, debug=debug)
     rpa.process_emails_automatically()
 
 if __name__ == "__main__":
-    print("FULL RPA SYSTEM")
-    print("=" * 30)
-    print("This system will automatically process emails")
-    print("and execute web actions with Selenium.")
-    print()
-    headless = True
-    print(f"Executing in headless mode...")
-    print("Press Ctrl+C to cancel if necessary.\n")
+    logger.info("FULL RPA SYSTEM")
+    logger.info("=" * 30)
+    logger.info("This system will automatically process emails")
+    logger.info("and execute web actions with Selenium.")
+    logger.info("")
+    
+    if HEADLESS_MODE:
+        logger.info("Executing in headless mode...")
+    else:
+        logger.info("Executing with browser window...")
+    
+    logger.info("Press Ctrl+C to cancel if necessary.")
+    logger.info("")
+    
     try:
-        while True:
-            run_full_rpa(headless=headless, debug=True)
-            print("Waiting 10 minutes for the next execution...")
-            time.sleep(600)
+        run_full_rpa(headless=HEADLESS_MODE, debug=DEBUG_MODE)
+        logger.info("Waiting 10 minutes for the next execution...")
+        time.sleep(600)
     except KeyboardInterrupt:
-        print("\nExecution stopped by user.") 
+        logger.info("Process interrupted by user")
+    except Exception as e:
+        logger.critical("Unexpected error in main execution", exception=e) 

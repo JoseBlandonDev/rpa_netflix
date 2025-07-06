@@ -1,5 +1,5 @@
 """
-Utilidades de automatización web usando Selenium para tareas RPA: configuración del navegador, navegación y clic en botones.
+Web automation utilities using Selenium for RPA tasks: browser configuration, navigation and button clicking.
 """
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -8,39 +8,50 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from sub.logger import get_logger
+from sub.error_handler import handle_errors, safe_execute, WebAutomationError
 import time
 import os
 
+# Get logger instance
+logger = get_logger()
+
 class WebAutomator:
     """
-    Clase para manejar la automatización web con Selenium, optimizada para entornos Linux y servidores.
+    Class to handle web automation with Selenium, optimized for Linux environments and servers.
     """
     
     def __init__(self, headless=True):
         """
-        Inicializa el automatizador web.
+        Initialize the web automator.
         Args:
-            headless (bool): Si es True, ejecuta el navegador en modo headless (ideal para VPS)
+            headless (bool): If True, runs browser in headless mode (ideal for VPS)
         """
         self.driver = None
         self.headless = headless
         self.wait_timeout = 10
-        self.resultado_ultimo_clic = {"exito": False, "observaciones": ""}
+        self.last_click_result = {"success": False, "observations": ""}
+        
+        logger.info(f"WebAutomator initialized - Headless: {headless}")
     
+    @handle_errors(max_retries=2, delay=2.0)
     def configure_browser(self):
         """
-        Configura y abre el navegador Chrome con opciones para Linux.
+        Configure and open Chrome browser with Linux options.
         Returns:
-            bool: True si se configuró correctamente, False en caso contrario
+            bool: True if configured successfully, False otherwise
         """
         try:
-            print("Configurando navegador Chrome...")
+            logger.info("Configuring Chrome browser...")
             chrome_options = Options()
+            
             if self.headless:
                 chrome_options.add_argument("--headless")
-                print("   Modo headless activado")
+                logger.info("   Headless mode activated")
             else:
-                print("   Modo con ventana visible")
+                logger.info("   Window mode activated")
+            
+            # Linux-specific options
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
@@ -52,140 +63,235 @@ class WebAutomator:
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--remote-debugging-port=9222")
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            print("   Configurando Chromium/ChromeDriver...")
+            
+            logger.info("   Configuring Chromium/ChromeDriver...")
+            
             try:
-                servicio = Service(ChromeDriverManager().install())
+                service = Service(ChromeDriverManager().install())
                 chrome_options.binary_location = "/usr/bin/chromium-browser"
-                self.driver = webdriver.Chrome(service=servicio, options=chrome_options)
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                logger.info("   ChromeDriver installed automatically")
             except Exception as e:
-                print(f"   Instalación automática falló, intentando configuración manual...")
+                logger.warning(f"   Automatic installation failed, trying manual configuration...")
                 self.driver = webdriver.Chrome(options=chrome_options)
+                logger.info("   Manual ChromeDriver configuration successful")
+            
             self.driver.implicitly_wait(self.wait_timeout)
-            print("Navegador configurado correctamente")
+            logger.info("   Browser configured successfully")
             return True
+            
         except Exception as e:
-            print(f"Error al configurar navegador: {e}")
-            self.resultado_ultimo_clic = {"exito": False, "observaciones": f"Error configuración: {e}"}
-            return False
+            logger.error("Error configuring browser", exception=e)
+            raise WebAutomationError(f"Failed to configure browser: {str(e)}")
     
+    @handle_errors(max_retries=2, delay=1.0)
     def open_link(self, url):
         """
-        Abre un enlace específico en el navegador.
+        Open a URL in the browser.
         Args:
-            url (str): La URL a abrir
+            url (str): URL to open
         Returns:
-            bool: True si se abrió correctamente, False en caso contrario
+            bool: True if successful, False otherwise
         """
         try:
             if not self.driver:
-                if not self.configure_browser():
-                    return False
-            print(f"Abriendo link: {url}")
+                logger.error("No browser open")
+                return False
+            
+            logger.info(f"Opening URL: {url}")
             self.driver.get(url)
-            time.sleep(3)
-            titulo = self.driver.title[:50] + "..." if len(self.driver.title) > 50 else self.driver.title
-            print(f"Página cargada: '{titulo}'")
+            time.sleep(3)  # Wait for page to load
+            
+            current_url = self.driver.current_url
+            logger.info(f"Successfully opened URL. Current URL: {current_url}")
             return True
+            
         except Exception as e:
-            print(f"Error al abrir link: {e}")
-            self.resultado_ultimo_clic = {"exito": False, "observaciones": f"Error al abrir link: {e}"}
+            logger.error(f"Error opening URL: {url}", exception=e)
             return False
     
-    def click_button(self, selector, selector_type="xpath", description="button"):
+    def get_page_title(self):
         """
-        Hace clic en un botón específico de la página.
-        Args:
-            selector (str): Selector del botón (XPath, CSS, ID, etc.)
-            selector_type (str): Tipo de selector ("xpath", "css", "id", "class", "tag")
-            description (str): Descripción para los logs
+        Get the current page title.
         Returns:
-            bool: True si el clic fue exitoso, False en caso contrario
+            str: Page title or empty string if error
         """
         try:
             if not self.driver:
-                print("No hay navegador abierto")
-                self.resultado_ultimo_clic = {"exito": False, "observaciones": "No hay navegador abierto"}
+                return ""
+            
+            title = self.driver.title
+            logger.debug(f"Page title: {title}")
+            return title
+            
+        except Exception as e:
+            logger.error("Error getting page title", exception=e)
+            return ""
+    
+    @handle_errors(max_retries=2, delay=1.0)
+    def click_button(self, selector, selector_type="xpath", description="button"):
+        """
+        Click a specific button on the page.
+        Args:
+            selector (str): Button selector (XPath, CSS, ID, etc.)
+            selector_type (str): Selector type ("xpath", "css", "id", "class", "tag")
+            description (str): Description for logs
+        Returns:
+            bool: True if click was successful, False otherwise
+        """
+        try:
+            if not self.driver:
+                logger.error("No browser open")
+                self.last_click_result = {"success": False, "observations": "No browser open"}
                 return False
-            tipos_selector = {
+            
+            selector_types = {
                 "xpath": By.XPATH,
                 "css": By.CSS_SELECTOR,
                 "id": By.ID,
                 "class": By.CLASS_NAME,
                 "tag": By.TAG_NAME
             }
-            if selector_type not in tipos_selector:
-                print(f"Tipo de selector no válido: {selector_type}")
-                self.resultado_ultimo_clic = {"exito": False, "observaciones": f"Selector inválido: {selector_type}"}
+            
+            if selector_type not in selector_types:
+                logger.error(f"Invalid selector type: {selector_type}")
+                self.last_click_result = {"success": False, "observations": f"Invalid selector: {selector_type}"}
                 return False
-            print(f"Buscando {description}: {selector}")
+            
+            logger.info(f"Looking for {description}: {selector}")
+            
             wait = WebDriverWait(self.driver, self.wait_timeout)
-            elemento = wait.until(
-                EC.element_to_be_clickable((tipos_selector[selector_type], selector))
+            element = wait.until(
+                EC.element_to_be_clickable((selector_types[selector_type], selector))
             )
-            print(f"Haciendo clic en {description}")
-            elemento.click()
+            
+            logger.info(f"Clicking {description}")
+            element.click()
             time.sleep(2)
-            print(f"Clic en {description} realizado correctamente")
-            self.resultado_ultimo_clic = {"exito": True, "observaciones": f"Clic exitoso en {description}"}
+            
+            logger.info(f"Click on {description} successful")
+            self.last_click_result = {"success": True, "observations": f"Click successful on {description}"}
             return True
+            
         except Exception as e:
-            print(f"Error al hacer clic en {description}: {e}")
-            self.resultado_ultimo_clic = {"exito": False, "observaciones": f"Error en clic: {e}"}
+            logger.error(f"Error clicking {description}: {str(e)}", exception=e)
+            self.last_click_result = {"success": False, "observations": f"Click error: {str(e)}"}
             return False
-    
-    def get_page_title(self):
-        """
-        Obtiene el título de la página actual.
-        Returns:
-            str: El título de la página o None si hay error
-        """
-        try:
-            if self.driver:
-                return self.driver.title
-            return None
-        except Exception as e:
-            print(f"Error al obtener título: {e}")
-            return None
-    
-    def get_current_url(self):
-        """
-        Obtiene la URL actual de la página.
-        Returns:
-            str: La URL actual o None si hay error
-        """
-        try:
-            if self.driver:
-                return self.driver.current_url
-            return None
-        except Exception as e:
-            print(f"Error al obtener URL: {e}")
-            return None
     
     def get_last_click_result(self):
         """
-        Obtiene el resultado del último intento de clic.
+        Get the result of the last click operation.
         Returns:
-            dict: Resultado del último clic
+            dict: Result with 'success' and 'observations' keys
         """
-        return self.resultado_ultimo_clic
+        return self.last_click_result
     
     def close_browser(self):
-        """
-        Cierra el navegador si está abierto.
-        """
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
+        """Close the browser and clean up resources."""
+        try:
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
+                logger.info("Browser closed successfully")
+        except Exception as e:
+            logger.error("Error closing browser", exception=e)
     
-    def __del__(self):
-        # No requiere docstring, destructor simple
-        self.close_browser()
+    def take_screenshot(self, filename="screenshot.png"):
+        """
+        Take a screenshot of the current page.
+        Args:
+            filename (str): Screenshot filename
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            if not self.driver:
+                logger.error("No browser open for screenshot")
+                return False
+            
+            self.driver.save_screenshot(filename)
+            logger.info(f"Screenshot saved: {filename}")
+            return True
+            
+        except Exception as e:
+            logger.error("Error taking screenshot", exception=e)
+            return False
+    
+    def get_page_source(self):
+        """
+        Get the current page source.
+        Returns:
+            str: Page source or empty string if error
+        """
+        try:
+            if not self.driver:
+                return ""
+            
+            source = self.driver.page_source
+            logger.debug(f"Page source length: {len(source)} characters")
+            return source
+            
+        except Exception as e:
+            logger.error("Error getting page source", exception=e)
+            return ""
+    
+    def wait_for_element(self, selector, selector_type="xpath", timeout=10):
+        """
+        Wait for an element to be present on the page.
+        Args:
+            selector (str): Element selector
+            selector_type (str): Selector type
+            timeout (int): Timeout in seconds
+        Returns:
+            bool: True if element found, False otherwise
+        """
+        try:
+            if not self.driver:
+                return False
+            
+            selector_types = {
+                "xpath": By.XPATH,
+                "css": By.CSS_SELECTOR,
+                "id": By.ID,
+                "class": By.CLASS_NAME,
+                "tag": By.TAG_NAME
+            }
+            
+            if selector_type not in selector_types:
+                logger.error(f"Invalid selector type: {selector_type}")
+                return False
+            
+            wait = WebDriverWait(self.driver, timeout)
+            element = wait.until(
+                EC.presence_of_element_located((selector_types[selector_type], selector))
+            )
+            
+            logger.debug(f"Element found: {selector}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error waiting for element: {selector}", exception=e)
+            return False
 
-def simple_click_test(url, button_selector, selector_type="xpath", headless=True):
-    """
-    Función de prueba simple para abrir una URL y hacer clic en un botón.
-    """
-    auto = WebAutomator(headless=headless)
-    if auto.open_link(url):
-        auto.click_button(button_selector, selector_type)
-    auto.close_browser() 
+if __name__ == "__main__":
+    logger.info("Testing WebAutomator module...")
+    
+    try:
+        automator = WebAutomator(headless=True)
+        
+        if automator.configure_browser():
+            logger.info("Browser configured successfully")
+            
+            # Test opening a simple page
+            success = automator.open_link("https://www.google.com")
+            if success:
+                title = automator.get_page_title()
+                logger.info(f"Successfully opened Google. Title: {title}")
+            
+            automator.close_browser()
+            logger.info("WebAutomator test completed successfully")
+        else:
+            logger.error("Failed to configure browser")
+            
+    except Exception as e:
+        logger.error("WebAutomator test failed", exception=e) 
