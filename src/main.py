@@ -187,11 +187,25 @@ class FullRPA:
     def _process_url(self, url, message, extracted_content, process_id):
         """Process a single URL with web automation."""
         try:
-            # Validate URL
+            logger.info(f"Processing URL: {url}")
+            
+            # Check if it's a Netflix URL and handle specially
+            if "netflix.com" in url.lower():
+                logger.info("Detected Netflix URL - using special handling")
+                success = self._process_netflix_url(url, message, extracted_content, process_id)
+                if success:
+                    self.total_success += 1
+                return
+            
+            # For other URLs, validate first
             logger.info(f"Validating URL: {url}")
-            response = requests.head(url, timeout=10)
-            if response.status_code >= 400:
-                raise WebAutomationError(f"URL returned status code {response.status_code}")
+            try:
+                response = requests.head(url, timeout=10)
+                if response.status_code >= 400:
+                    raise WebAutomationError(f"URL returned status code {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Could not validate URL with requests: {e}")
+                # Continue anyway, let Selenium handle it
             
             # Open URL and perform automation
             if self.automator:
@@ -218,6 +232,84 @@ class FullRPA:
             logger.error(f"Error processing URL: {url}", exception=e)
             self._register_email_result(message, extracted_content, url, "Error", str(e), "URL processing failed", process_id)
             self.total_errors += 1
+    
+    def _process_netflix_url(self, url, message, extracted_content, process_id):
+        """Special handling for Netflix URLs."""
+        try:
+            logger.info("Opening Netflix URL with Selenium...")
+            
+            if not self.automator:
+                raise WebAutomationError("Web automator not initialized")
+            
+            # Open the URL directly with Selenium (skip requests validation)
+            success = self.automator.open_link(url)
+            if not success:
+                raise WebAutomationError("Failed to open Netflix URL")
+            
+            # Wait a bit for the page to load
+            time.sleep(3)
+            
+            # Get page title
+            title = self.automator.get_page_title()
+            logger.info(f"Netflix page title: {title}")
+            
+            # Try to click Netflix-specific buttons
+            netflix_click_success = self._attempt_netflix_button_clicks()
+            
+            if netflix_click_success:
+                final_result = "Netflix button clicked successfully"
+                logger.info("Netflix automation completed successfully")
+            else:
+                final_result = "Netflix page opened but no buttons clicked"
+                logger.warning("Netflix page opened but no buttons were clicked")
+            
+            self._register_email_result(message, extracted_content, url, "Success", "", final_result, process_id)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing Netflix URL: {url}", exception=e)
+            self._register_email_result(message, extracted_content, url, "Error", str(e), "Netflix processing failed", process_id)
+            return False
+    
+    def _attempt_netflix_button_clicks(self) -> bool:
+        """Attempt to click Netflix-specific buttons."""
+        try:
+            # Netflix-specific button selectors
+            netflix_selectors = [
+                "//button[contains(text(), 'Continue')]",
+                "//button[contains(text(), 'Next')]",
+                "//button[contains(text(), 'Submit')]",
+                "//button[contains(text(), 'Confirm')]",
+                "//button[contains(text(), 'Update')]",
+                "//button[contains(text(), 'Save')]",
+                "//button[contains(text(), 'OK')]",
+                "//button[contains(text(), 'Accept')]",
+                "//button[contains(@class, 'btn')]",
+                "//button[contains(@class, 'button')]",
+                "//input[@type='submit']",
+                "//a[contains(text(), 'Continue')]",
+                "//a[contains(text(), 'Next')]",
+                "//a[contains(text(), 'Submit')]",
+                "//a[contains(@class, 'btn')]",
+                "//a[contains(@class, 'button')]"
+            ]
+            
+            for selector in netflix_selectors:
+                try:
+                    if self.automator.click_button(selector, SELECTOR_TYPE, f"Netflix button: {selector}"):
+                        result = self.automator.get_last_click_result()
+                        logger.info(f"Netflix button click successful: {result}")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+            
+            logger.warning("No Netflix buttons found to click")
+            return False
+            
+        except Exception as e:
+            logger.error("Error during Netflix button clicking", exception=e)
+            return False
     
     def _attempt_button_clicks(self) -> bool:
         """Attempt to click buttons on the page."""
