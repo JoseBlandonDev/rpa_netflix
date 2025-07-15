@@ -4,21 +4,19 @@ After=network.target
 Wants=network.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=root
-WorkingDirectory=/root/rpa_system
-ExecStart=/usr/bin/python3 /root/rpa_system/rpa/main.py
-Restart=on-failure
-RestartSec=30
+WorkingDirectory=/root/repo_rpa
+ExecStart=/usr/bin/python3 /root/repo_rpa/rpa/main.py
 StandardOutput=journal
 StandardError=journal
-EnvironmentFile=/root/rpa_system/.env
+EnvironmentFile=/root/repo_rpa/.env
 
 # Configuración de seguridad
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/root/rpa_system
+ReadWritePaths=/root/repo_rpa
 
 [Install]
 WantedBy=multi-user.target 

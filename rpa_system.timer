@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer para Sistema RPA - Ejecución cada minuto
+Requires=rpa_system.service
+
+[Timer]
+Unit=rpa_system.service
+OnCalendar=*:*:00
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target 
