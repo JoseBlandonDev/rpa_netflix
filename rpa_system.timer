@@ -1,10 +1,10 @@
 [Unit]
-Description=Timer para Sistema RPA - Ejecución cada minuto
+Description=Timer para Sistema RPA - Ejecución cada 30 segundos
 Requires=rpa_system.service
 
 [Timer]
 Unit=rpa_system.service
-OnCalendar=*:*:00
+OnCalendar=*:*:00/30
 AccuracySec=1s
 Persistent=true
 

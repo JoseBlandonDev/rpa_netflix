@@ -117,18 +117,29 @@ class EmailReader:
             emails: lista de emails no leídos
         """
         try:
+            db = Database()
             with MailBox(self.imap_server).login(self.email, self.password) as mailbox:
                 for email in emails:
                     logger.info(f"Revisando correo de {email.from_} con asunto: {email.subject}")
+                    
+                    # Verificar si el correo ya fue procesado anteriormente
+                    if db.is_email_processed(str(email.uid)):
+                        logger.info(f"Correo UID {email.uid} ya fue procesado anteriormente, saltando...")
+                        continue
+                    
                     if ("REPORTE" in email.subject.upper() or "REPORTE" in email.text.upper()):
                         logger.info(f"Palabra clave 'REPORTE' detectada en el correo de {email.from_}")
-                        db = Database()
+                        
+                        # Marcar como procesado ANTES de enviar el reporte
+                        db.mark_email_processed(str(email.uid), email.from_, email.subject, 'reporte')
+                        
                         excel_path = db.export_to_excel()
                         if excel_path:
                             send_report_email(email.from_, excel_path)
                             logger.info(f"Reporte enviado a {email.from_}")
                         else:
                             logger.error("No se pudo generar el archivo Excel para el reporte.")
+                        
                         # Marcar el correo como leído usando el flag estándar IMAP
                         try:
                             mailbox.flag(email.uid, '\\Seen', True)

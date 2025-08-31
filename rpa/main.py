@@ -101,14 +101,27 @@ def process_emails():
         email_reader = EmailReader()
         web_driver = WebDriver()
         
-        # Leer todos los correos no leídos (sin filtrar remitente)
+        # Leer todos los correos no leídos (sin marcarlos automáticamente como leídos)
         with MailBox(email_reader.imap_server).login(email_reader.email, email_reader.password) as mailbox:
-            all_unread_emails = list(mailbox.fetch('(UNSEEN)', mark_seen=True, bulk=True))
+            all_unread_emails = list(mailbox.fetch('(UNSEEN)', mark_seen=False, bulk=True))
+        
         # Procesar solicitudes de reporte para cualquier remitente
         email_reader.process_report_requests(all_unread_emails)
+        
         # Leer solo los correos no leídos del remitente filtrado para procesar URLs
         filtered_emails = [email for email in all_unread_emails if email.from_.lower() == email_reader.sender_filter.lower()]
-        emails_to_process = [email for email in filtered_emails if not ("REPORTE" in email.subject.upper() or "REPORTE" in email.text.upper())]
+        
+        # Filtrar correos que ya fueron procesados anteriormente
+        db = Database()
+        unprocessed_emails = []
+        for email in filtered_emails:
+            if not db.is_email_processed(str(email.uid)):
+                unprocessed_emails.append(email)
+            else:
+                logger.info(f"Correo UID {email.uid} ya fue procesado anteriormente, saltando...")
+        
+        emails_to_process = [email for email in unprocessed_emails if not ("REPORTE" in email.subject.upper() or "REPORTE" in email.text.upper())]
+        
         if not emails_to_process:
             logger.info("No se encontraron correos no leídos para procesar")
             return
@@ -117,6 +130,9 @@ def process_emails():
         # Procesar cada correo
         for email in emails_to_process:
             try:
+                # Marcar como procesado ANTES de procesar
+                db.mark_email_processed(str(email.uid), email.from_, email.subject, 'url')
+                
                 # Extraer link del correo
                 link = email_reader.extract_link_from_email(email)
                 
@@ -201,6 +217,9 @@ def main():
     if should_cleanup_selenium(selenium_cleanup_flag):
         cleanup_selenium_cache()
         update_selenium_cleanup_flag(selenium_cleanup_flag)
+    
+    # Limpiar correos procesados antiguos
+    db.cleanup_old_processed_emails(days=7)
     
     process_emails()
 
