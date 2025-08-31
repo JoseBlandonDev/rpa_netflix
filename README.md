@@ -301,4 +301,4 @@ Para problemas o preguntas:
 - imap-tools
 - python-dotenv
 - openpyxl
-- sqlite3 (incluido con Python) 
+- sqlite3 (incluido con Python) # automatizacion
