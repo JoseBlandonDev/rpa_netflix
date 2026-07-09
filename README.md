@@ -164,6 +164,23 @@ Para Gmail, es necesario:
 2. Generar contraseña de aplicación
 3. Usar la contraseña de aplicación en lugar de la contraseña normal
 
+## Configuración de Eliminación Automática
+
+El sistema incluye la funcionalidad de eliminación automática de correos después de procesarlos exitosamente:
+
+```bash
+# Habilitar eliminación automática
+AUTO_DELETE_EMAILS=true
+
+# Deshabilitar eliminación automática
+AUTO_DELETE_EMAILS=false
+```
+
+**Comportamiento:**
+- **Correos procesados exitosamente**: Se eliminan automáticamente si está habilitado
+- **Correos con errores**: Se mantienen en la bandeja para revisión manual
+- **Solo se eliminan correos después de completar el proceso** (hacer clic en botón específico)
+
 ## Monitoreo y Logs
 
 ### Archivos de Log

@@ -101,48 +101,42 @@ def process_emails():
         email_reader = EmailReader()
         web_driver = WebDriver()
         
-        # Leer todos los correos no leídos (sin marcarlos automáticamente como leídos)
-        with MailBox(email_reader.imap_server).login(email_reader.email, email_reader.password) as mailbox:
-            all_unread_emails = list(mailbox.fetch('(UNSEEN)', mark_seen=False, bulk=True))
-        
-        # Procesar solicitudes de reporte para cualquier remitente
-        email_reader.process_report_requests(all_unread_emails)
-        
         # Leer solo los correos no leídos del remitente filtrado para procesar URLs
+        logger.info("Leyendo correos de Netflix...")
+        
+        # Obtener todos los correos no leídos
+        all_unread_emails = email_reader.get_unread_emails()
+        
         filtered_emails = [email for email in all_unread_emails if email.from_.lower() == email_reader.sender_filter.lower()]
         
-        # Filtrar correos que ya fueron procesados anteriormente
-        db = Database()
-        unprocessed_emails = []
-        for email in filtered_emails:
-            if not db.is_email_processed(str(email.uid)):
-                unprocessed_emails.append(email)
-            else:
-                logger.info(f"Correo UID {email.uid} ya fue procesado anteriormente, saltando...")
-        
-        emails_to_process = [email for email in unprocessed_emails if not ("REPORTE" in email.subject.upper() or "REPORTE" in email.text.upper())]
+        # Filtrar solo correos que no sean solicitudes de reporte
+        emails_to_process = [email for email in filtered_emails if not ("REPORTE" in email.subject.upper() or "REPORTE" in email.text.upper())]
         
         if not emails_to_process:
-            logger.info("No se encontraron correos no leídos para procesar")
+            logger.info("No hay correos de Netflix para procesar")
             return
-        logger.info(f"Se encontraron {len(emails_to_process)} correos no leídos para procesar")
+        logger.info(f"Hay {len(emails_to_process)} correos de Netflix para procesar")
         
         # Procesar cada correo
         for email in emails_to_process:
             try:
-                # Marcar como procesado ANTES de procesar
-                db.mark_email_processed(str(email.uid), email.from_, email.subject, 'url')
+                logger.info(f"Procesando correo: {email.subject}")
                 
                 # Extraer link del correo
+                logger.info("Extrayendo URL...")
                 link = email_reader.extract_link_from_email(email)
                 
                 if link:
-                    logger.info(f"Link extraído: {link}")
+                    logger.info(f"URL extraída: {link}")
+                    logger.info("Abriendo en navegador...")
                     
                     # Abrir link y hacer clic en botón
                     success = web_driver.click_button_on_page(link)
                     
                     if success:
+                        logger.info("Haciendo click...")
+                        logger.info("Click exitoso")
+                        
                         db.insert_success_record(
                             sender=email.from_,
                             subject=email.subject,
@@ -150,7 +144,18 @@ def process_emails():
                             status="SUCCESS",
                             observations="Procesado correctamente"
                         )
+                        
+                        # Eliminar correo automáticamente si está habilitado
+                        if email_reader.should_auto_delete_emails():
+                            if email_reader.delete_email(email):
+                                logger.info("Correo eliminado")
+                            else:
+                                logger.warning("Error al eliminar correo")
+                        else:
+                            logger.info("Correo mantenido (eliminación deshabilitada)")
+                            
                     else:
+                        logger.error("Click fallido")
                         db.insert_failed_record(
                             sender=email.from_,
                             subject=email.subject,
@@ -158,13 +163,30 @@ def process_emails():
                             status="FAILED",
                             observations="Error al hacer clic en botón"
                         )
-                    logger.info(f"Correo procesado: {email.subject}")
+                        
                 else:
-                    logger.info(f"Correo sin link válido, ignorando: {email.subject}")
-                    # No se registra en la base de datos, solo se marca como leído e ignora
+                    logger.info("No se encontró URL válida")
+                    
+                    # Registrar fallo por falta de URL
+                    db.insert_failed_record(
+                        sender=email.from_,
+                        subject=email.subject,
+                        link="",
+                        status="NO_URL",
+                        observations="Correo sin URL válida de Netflix"
+                    )
+                    
+                    # Eliminar correo sin URL automáticamente
+                    if email_reader.should_auto_delete_emails():
+                        if email_reader.delete_email(email):
+                            logger.info("Correo sin URL eliminado")
+                        else:
+                            logger.warning("Error al eliminar correo sin URL")
+                    else:
+                        logger.info("Correo sin URL mantenido (eliminación deshabilitada)")
                     
             except Exception as e:
-                logger.error(f"Error procesando correo {email.subject}: {str(e)}")
+                logger.error(f"Error: {str(e)}")
                 db.insert_failed_record(
                     sender=email.from_,
                     subject=email.subject,
@@ -173,6 +195,15 @@ def process_emails():
                     observations=f"Error: {str(e)}",
                     error_details=str(e)
                 )
+                
+                # Eliminar correo con error automáticamente
+                if email_reader.should_auto_delete_emails():
+                    if email_reader.delete_email(email):
+                        logger.info("Correo con error eliminado")
+                    else:
+                        logger.warning("Error al eliminar correo con error")
+                else:
+                    logger.info("Correo con error mantenido (eliminación deshabilitada)")
         
         logger.info("Proceso completado")
         
@@ -218,8 +249,7 @@ def main():
         cleanup_selenium_cache()
         update_selenium_cleanup_flag(selenium_cleanup_flag)
     
-    # Limpiar correos procesados antiguos
-    db.cleanup_old_processed_emails(days=7)
+
     
     process_emails()
 

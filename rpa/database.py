@@ -76,17 +76,7 @@ class Database:
                 )
             ''')
 
-            # Crear tabla para rastrear correos procesados
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS processed_emails (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    email_uid TEXT UNIQUE NOT NULL,
-                    sender TEXT NOT NULL,
-                    subject TEXT,
-                    processed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    email_type TEXT DEFAULT 'reporte'
-                )
-            ''')
+
 
             self.connection.commit()
             logger.info("Tablas de base de datos creadas/verificadas exitosamente")
@@ -327,93 +317,7 @@ class Database:
             if self.connection:
                 self.connection.close()
 
-    def is_email_processed(self, email_uid: str) -> bool:
-        """
-        Verifica si un correo ya ha sido procesado.
-        
-        Args:
-            email_uid: UID del correo a verificar
-            
-        Returns:
-            bool: True si el correo ya fue procesado
-        """
-        try:
-            self.connection = sqlite3.connect(self.db_path)
-            cursor = self.connection.cursor()
-            
-            cursor.execute('SELECT id FROM processed_emails WHERE email_uid = ?', (email_uid,))
-            result = cursor.fetchone()
-            
-            return result is not None
-            
-        except Exception as e:
-            logger.error(f"Error verificando correo procesado: {str(e)}")
-            return False
-        finally:
-            if self.connection:
-                self.connection.close()
 
-    def mark_email_processed(self, email_uid: str, sender: str, subject: str, email_type: str = 'reporte') -> bool:
-        """
-        Marca un correo como procesado en la base de datos.
-        
-        Args:
-            email_uid: UID del correo
-            sender: Remitente del correo
-            subject: Asunto del correo
-            email_type: Tipo de correo (reporte, url, etc.)
-            
-        Returns:
-            bool: True si se marcó correctamente
-        """
-        try:
-            self.connection = sqlite3.connect(self.db_path)
-            cursor = self.connection.cursor()
-            
-            cursor.execute('''
-                INSERT OR IGNORE INTO processed_emails 
-                (email_uid, sender, subject, email_type)
-                VALUES (?, ?, ?, ?)
-            ''', (email_uid, sender, subject, email_type))
-            
-            self.connection.commit()
-            logger.info(f"Correo marcado como procesado: UID {email_uid}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error marcando correo como procesado: {str(e)}")
-            return False
-        finally:
-            if self.connection:
-                self.connection.close()
 
-    def cleanup_old_processed_emails(self, days: int = 7) -> int:
-        """
-        Limpia correos procesados antiguos de la base de datos.
-        
-        Args:
-            days: Número de días de antigüedad para conservar
-            
-        Returns:
-            int: Número de registros eliminados
-        """
-        try:
-            self.connection = sqlite3.connect(self.db_path)
-            cursor = self.connection.cursor()
-            
-            cursor.execute('''
-                DELETE FROM processed_emails
-                WHERE processed_at < datetime('now', ?)
-            ''', (f'-{days} days',))
-            
-            deleted = cursor.rowcount
-            self.connection.commit()
-            logger.info(f"Correos procesados eliminados por antigüedad (> {days} días): {deleted}")
-            return deleted
-            
-        except Exception as e:
-            logger.error(f"Error limpiando correos procesados: {str(e)}")
-            return 0
-        finally:
-            if self.connection:
-                self.connection.close() 
+
+ 

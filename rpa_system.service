@@ -6,17 +6,18 @@ Wants=network.target
 [Service]
 Type=oneshot
 User=root
-WorkingDirectory=/root/repo_rpa
-ExecStart=/usr/bin/python3 /root/repo_rpa/rpa/main.py
+WorkingDirectory=/root/automatizacion
+ExecStart=/usr/bin/python3 /root/automatizacion/rpa/main.py
 StandardOutput=journal
 StandardError=journal
-EnvironmentFile=/root/repo_rpa/.env
+EnvironmentFile=/root/automatizacion/.env
+TimeoutSec=300
 
 # Configuración de seguridad
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/root/repo_rpa
+ReadWritePaths=/root/automatizacion
 
 [Install]
-WantedBy=multi-user.target 
+WantedBy=multi-user.target
