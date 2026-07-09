@@ -1,14 +1,50 @@
 # Sistema RPA - Comandos y Funcionalidades
 
+## Ejecución por Timer
+
+El sistema corre en modo de **ciclo único**: cada invocación de `rpa/main.py` procesa lo que encuentra y termina, no queda corriendo en background. La ejecución periódica la da `rpa_system.timer` (systemd), que dispara `rpa_system.service` (tipo `oneshot`) **cada 30 segundos** (`OnCalendar=*:*:00/30`).
+
+```bash
+# Ver próximas ejecuciones programadas
+sudo systemctl list-timers rpa_system.timer
+
+# Ver estado del timer
+sudo systemctl status rpa_system.timer
+
+# Iniciar / detener / reiniciar el timer
+sudo systemctl start rpa_system.timer
+sudo systemctl stop rpa_system.timer
+sudo systemctl restart rpa_system.timer
+
+# Disparar una ejecución manual (un solo ciclo)
+sudo systemctl start rpa_system.service
+```
+
+## Filtro de Correos por Tiempo
+
+`get_unread_emails()` solo devuelve correos no leídos del remitente configurado en `SENDER_FILTER` **recibidos en los últimos 5 minutos**. Esto evita reprocesar correos viejos si el timer estuvo detenido y evita que un correo se quede "atascado" si por algún motivo no se pudo marcar como leído. El valor de 5 minutos está fijo en el código (`rpa/email_reader.py`, `get_unread_emails`), no es configurable por `.env`.
+
+## Timeout de Conexiones IMAP
+
+Todas las operaciones IMAP (leer, marcar como leído, eliminar) usan un timeout de socket configurable:
+
+```bash
+# En .env
+IMAP_TIMEOUT=30   # segundos (valor por defecto si no se define)
+```
+
+Si una operación excede el timeout, se registra un error y el ciclo continúa (no se cuelga el proceso). Buscar en logs:
+
+```bash
+grep "Timeout" rpa_system.log
+```
+
 ## Funcionalidad de Eliminación Automática de Correos
 
 ### Descripción
-El sistema RPA ahora incluye la funcionalidad de **eliminación automática de correos** después de procesarlos exitosamente. Esta característica ayuda a optimizar el espacio en la bandeja de entrada y mantener la organización del correo.
+El sistema puede eliminar automáticamente un correo de la bandeja después de procesarlo, sin importar el resultado (éxito, fallo, sin URL o error).
 
 ### Configuración
-
-#### Variable de Entorno
-Para habilitar o deshabilitar la eliminación automática, configurar en el archivo `.env`:
 
 ```bash
 # Habilitar eliminación automática
@@ -18,124 +54,84 @@ AUTO_DELETE_EMAILS=true
 AUTO_DELETE_EMAILS=false
 ```
 
-**Valores válidos para habilitar:**
-- `true`, `1`, `yes`, `on`
-
-**Valores válidos para deshabilitar:**
-- `false`, `0`, `no`, `off`
+**Valores válidos para habilitar:** `true`, `1`, `yes`, `on`
+**Valores válidos para deshabilitar:** `false`, `0`, `no`, `off` (o la variable ausente)
 
 ### Comportamiento del Sistema
 
-#### 1. Procesamiento de URLs
-- **Correo procesado exitosamente**: Se elimina automáticamente si `AUTO_DELETE_EMAILS=true`
-- **Correo con error**: Se mantiene en la bandeja para revisión manual
-- **Correo sin link válido**: Se mantiene en la bandeja
+Se evalúa `AUTO_DELETE_EMAILS` después de cada uno de estos desenlaces, en `rpa/main.py`:
 
-#### 2. Solicitudes de Reporte
-- **Reporte enviado exitosamente**: Se elimina automáticamente si `AUTO_DELETE_EMAILS=true`
-- **Error en generación de reporte**: Se mantiene en la bandeja para revisión manual
+| Desenlace | Registro en BD | ¿Se elimina si está habilitado? |
+|---|---|---|
+| Clic exitoso en el botón | `SUCCESS` | Sí |
+| Clic fallido en el botón | `FAILED` | No se intenta eliminar en el flujo actual |
+| Sin URL válida encontrada | `NO_URL` | Sí |
+| Excepción durante el procesamiento | `ERROR` | Sí |
+| Solicitud de reporte procesada exitosamente | (no aplica, es reporte) | Sí |
+
+Si `AUTO_DELETE_EMAILS` está deshabilitado, el correo queda marcado como leído pero se mantiene en la bandeja para revisión manual.
 
 ### Logs del Sistema
 
-#### Mensajes de Eliminación Exitosa
-```
-INFO - Correo eliminado exitosamente: [Asunto del correo] (UID: [UID])
-INFO - Correo eliminado automáticamente después de procesamiento exitoso: [Asunto del correo]
-INFO - Correo de reporte eliminado automáticamente después de envío exitoso: [Asunto del correo]
-```
+Mensajes reales que emite el sistema (`rpa/main.py`, `rpa/email_reader.py`):
 
-#### Mensajes de Eliminación Fallida
 ```
-WARNING - No se pudo eliminar el correo después del procesamiento: [Asunto del correo]
-WARNING - No se pudo eliminar el correo de reporte después del envío: [Asunto del correo]
-```
-
-#### Mensajes de Funcionalidad Deshabilitada
-```
-INFO - Eliminación automática deshabilitada, correo mantenido: [Asunto del correo]
-INFO - Eliminación automática deshabilitada, correo de reporte mantenido: [Asunto del correo]
+INFO - Correo eliminado
+INFO - Correo mantenido (eliminación deshabilitada)
+INFO - Correo sin URL eliminado
+INFO - Correo sin URL mantenido (eliminación deshabilitada)
+INFO - Correo con error eliminado
+INFO - Correo con error mantenido (eliminación deshabilitada)
+INFO - Correo de reporte eliminado
+WARNING - Error al eliminar correo
+WARNING - Error al eliminar correo sin URL
+WARNING - Error al eliminar correo con error
+WARNING - Error al eliminar correo de reporte
 ```
 
 ### Comandos de Gestión
 
-#### Ver Estado de Eliminación Automática
 ```bash
-# Ver logs relacionados con eliminación
-grep "eliminado\|eliminación" rpa_system.log
+# Ver logs relacionados con eliminación de correos
+grep -i "eliminad" rpa_system.log
 
-# Ver logs de eliminación exitosa
-grep "eliminado exitosamente" rpa_system.log
+# Contar correos eliminados exitosamente
+grep -c "eliminado$" rpa_system.log
 
-# Ver logs de eliminación fallida
-grep "No se pudo eliminar" rpa_system.log
+# Ver advertencias de eliminación fallida
+grep "Error al eliminar" rpa_system.log
 ```
 
-#### Cambiar Configuración en Tiempo Real
+### Cambiar Configuración en Tiempo Real
+
 ```bash
-# Editar archivo de configuración
 nano .env
+# Cambiar AUTO_DELETE_EMAILS=true/false
 
-# Cambiar AUTO_DELETE_EMAILS=true a AUTO_DELETE_EMAILS=false
-# o viceversa
-
-# Reiniciar el servicio para aplicar cambios
-sudo systemctl restart rpa_system
+# No hace falta reiniciar ningún proceso: cada ejecución del timer
+# vuelve a cargar el .env desde cero (no hay proceso persistente).
 ```
 
 ### Consideraciones de Seguridad
 
-#### Ventajas
-- **Optimización de espacio**: Reduce el uso de almacenamiento en la bandeja
-- **Organización**: Mantiene la bandeja limpia de correos procesados
-- **Automatización**: No requiere intervención manual para limpieza
-
-#### Precauciones
-- **Pérdida de datos**: Los correos eliminados no se pueden recuperar
-- **Auditoría**: Solo se eliminan correos procesados exitosamente
-- **Configuración**: Se puede deshabilitar fácilmente si es necesario
+- **Los correos eliminados no se pueden recuperar** desde la bandeja
+- Los registros en la base de datos se conservan siempre, independientemente de la eliminación del correo
+- Se puede deshabilitar en cualquier momento editando `.env`, sin reiniciar servicios
 
 ### Solución de Problemas
 
-#### Correos que no se eliminan
-1. **Verificar configuración**: Confirmar que `AUTO_DELETE_EMAILS=true` en `.env`
-2. **Revisar logs**: Buscar mensajes de error en la eliminación
-3. **Verificar permisos**: El sistema debe tener permisos de escritura en la bandeja
-4. **Reiniciar servicio**: Aplicar cambios de configuración
+**Correos que no se eliminan:**
+1. Confirmar `AUTO_DELETE_EMAILS=true` en `.env`
+2. Revisar logs: `grep "Error al eliminar" rpa_system.log`
+3. Confirmar que la cuenta IMAP tiene permisos para eliminar mensajes
+4. Confirmar que no se superó `IMAP_TIMEOUT` durante la eliminación
 
-#### Logs de eliminación faltantes
-1. **Verificar nivel de logging**: Asegurar que esté configurado en INFO o superior
-2. **Revisar archivo de log**: Confirmar que `rpa_system.log` se esté generando
-3. **Verificar permisos**: El sistema debe poder escribir en el archivo de log
-
-### Monitoreo y Mantenimiento
-
-#### Verificación Diaria
-```bash
-# Ver logs de eliminación del día
-grep "$(date +%Y-%m-%d)" rpa_system.log | grep "eliminado"
-
-# Contar correos eliminados exitosamente
-grep "eliminado exitosamente" rpa_system.log | wc -l
-
-# Verificar errores de eliminación
-grep "No se pudo eliminar" rpa_system.log | wc -l
-```
-
-#### Limpieza de Logs
-```bash
-# Mantener solo los últimos 1000 logs de eliminación
-tail -n 1000 rpa_system.log | grep "eliminado" > eliminacion_logs.tmp
-mv eliminacion_logs.tmp eliminacion_logs.txt
-```
+**No aparecen logs de eliminación:**
+1. Verificar que `rpa_system.log` se está generando: `ls -la rpa_system.log`
+2. Verificar que el timer se está ejecutando: `sudo systemctl list-timers rpa_system.timer`
+3. Confirmar que efectivamente llegaron correos de `SENDER_FILTER` en los últimos 5 minutos
 
 ### Integración con Otros Sistemas
 
-#### Base de Datos
-- Los correos eliminados siguen registrados en la base de datos
-- Se mantiene el historial completo de procesamiento
-- La eliminación solo afecta la bandeja de entrada, no los registros
-
-#### Sistema de Notificaciones
-- Las notificaciones de eliminación se registran en los logs
-- No se envían notificaciones externas sobre eliminación
-- El sistema mantiene trazabilidad completa de todas las operaciones 
+- **Base de datos**: los correos eliminados siguen registrados; la eliminación solo afecta la bandeja de entrada, no el historial
+- **Reportes**: cualquier correo (de cualquier remitente) con "REPORTE" en asunto o cuerpo dispara el envío de un Excel con el historial completo (ver `rpa/notifier.py` y `Database.export_to_excel`)
