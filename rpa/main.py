@@ -6,6 +6,7 @@ Orquesta todo el flujo de lectura de correos, extracción de links y automatizac
 
 import os
 import logging
+import logging.handlers
 import time
 import shutil
 from datetime import datetime, date
@@ -19,11 +20,29 @@ from driver_web import WebDriver
 from database import Database
 
 # Configurar logging
+#
+# El timer corre cada 30 segundos, asi que un unico archivo crece sin freno
+# (llego a 472 MB / 5.9 millones de lineas). Con rotacion diaria, cada
+# medianoche el log del dia pasa a rpa_system.log.AAAA-MM-DD y se conserva
+# un mes: backupCount=30 borra automaticamente el archivo mas viejo, que es
+# justo lo que sobra pasados los 30 dias.
+#
+# La rotacion la hace el propio logging al escribir la primera linea despues
+# de medianoche (un rename mas un unlink, milisegundos). Si llegara a fallar,
+# logging captura el error y sigue: no puede detener la ejecucion ni el timer.
+#
+# Ruta absoluta a partir de este archivo para no depender del directorio de
+# trabajo (systemd usa WorkingDirectory=/root/automatizacion, pero una
+# ejecucion manual desde otra carpeta escribiria el log en otro sitio).
+LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rpa_system.log')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('rpa_system.log'),
+        logging.handlers.TimedRotatingFileHandler(
+            LOG_PATH, when='midnight', backupCount=30, encoding='utf-8'
+        ),
         logging.StreamHandler()
     ]
 )
